@@ -61,9 +61,9 @@
   hosts: aws_provisioned
   become: yes
   become_method: sudo
-  
+
   tasks:
-    - name: ping 
+    - name: ping
       ping:
 
     - name: Create service account
