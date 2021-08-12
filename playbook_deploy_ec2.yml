@@ -63,7 +63,8 @@
   become_method: sudo
   
   tasks:
-    - ping:
+    - name: ping 
+      ping:
 
     - name: Create service account
       user:
