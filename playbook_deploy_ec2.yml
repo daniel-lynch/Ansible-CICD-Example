@@ -1,0 +1,90 @@
+---
+- name: Deploy EC2 Instance
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    ami_image_map:
+      rhel8: ami-0ba62214afa52bec7
+
+  collections:
+    - amazon.aws
+
+  tasks:
+    - name: Include AWS deployment access and secret key
+      include_vars:
+        file: secrets/aws.yml
+
+    - name: Deploy EC2 Instance
+      amazon.aws.ec2:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        key_name: primary_ssh_key # ssh private key pair
+        instance_type: t2.micro
+        image: "{{ ami_image_map.rhel8 }}"
+        wait: yes
+        group: launch-wizard-1 # security_group / 22/ssh
+        count: 1
+        vpc_subnet_id: subnet-ec7b8887 # vpc SUBNET id
+        assign_public_ip: yes
+        state: present
+      register: created_instances
+
+    # - debug: var=created_instances
+
+    - name: Add host to in-memory inventory
+      add_host:
+        hostname: "{{ item.dns_name }}"
+        groups: aws_provisioned
+        ansible_user: ec2-user
+        ansible_host: "{{ item.public_ip }}"
+      loop: "{{ created_instances.instances }}"
+
+    - name: Wait for all newly provisioned hosts to be alive
+      wait_for:
+        timeout: 300
+        port: 22
+        delay: 10
+        search_regex: OpenSSH
+        host: "{{ item.public_ip }}"
+      loop: "{{ created_instances.instances }}"
+
+  module_defaults:
+    amazon.aws.ec2:
+      aws_region: us-east-2
+      instance_initiated_shutdown_behavior: terminate
+
+
+## Post Provisioning
+- name: Post provisioning tasks
+  hosts: aws_provisioned
+  become: yes
+  become_method: sudo
+  
+  tasks:
+    - ping:
+
+    - name: Create service account
+      user:
+        name: svc_prod
+        state: present
+        comment: Production service account
+        shell: /bin/bash
+        password: "{{ 'Nothing01!' | password_hash('sha512') }}"
+        update_password: on_create
+
+    # - name: Update yum packages
+    #   yum:
+    #     name: '*'
+    #     state: latest
+
+    - name: Enable SSH PasswordAuthentication
+      lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: 'PasswordAuthentication no'
+        line: 'PasswordAuthentication yes'
+
+    - name: Deploy standard ssh banner # Will restart ssh
+      include_role:
+        name: ssh-banner
